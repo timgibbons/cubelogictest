@@ -8,6 +8,8 @@ This will include one Interface, which has only one method: it takes a list of t
 ## Assumptions
 
 - Trade and Order price has been changed to BigDecimal to ensure accuracy and account for larger numbers
+- Trades and Orders will always have prices, timestamps and sides assigned and not null
+- Trades can be negative
 
 
 ## Original requested task description

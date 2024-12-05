@@ -1,18 +1,20 @@
 package com.timgibbons.cubelogic.tradeanalyser.services;
 
 import java.math.BigDecimal;
-import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
-import java.util.stream.Collectors;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.timgibbons.cubelogic.tradeanalyser.domain.Order;
 import com.timgibbons.cubelogic.tradeanalyser.domain.Side;
 import com.timgibbons.cubelogic.tradeanalyser.domain.Trade;
 import com.timgibbons.cubelogic.tradeanalyser.interfaces.TradeAnalyser;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class TradeAnalyserImpl implements TradeAnalyser {
+
+    private static final Logger logger = LoggerFactory.getLogger(TradeAnalyserImpl.class);
 
     private static final int SUSPICIOUS_TRADE_WINDOW = 30;
     
@@ -20,6 +22,8 @@ public class TradeAnalyserImpl implements TradeAnalyser {
     public List<Trade> findSuspiciousTrades(List<Trade> trades, List<Order> orders) {
         // Set used to ensure no duplicates when price and window out of bounds
         var suspiciousTrades = new HashSet<Trade>();
+
+        logger.info("Checking for suspicious trades");
 
         for (Trade trade : trades) {
             orders.stream()
@@ -35,23 +39,42 @@ public class TradeAnalyserImpl implements TradeAnalyser {
                     .forEach(order -> suspiciousTrades.add(trade));
         }
 
+        if(!suspiciousTrades.isEmpty()) {
+            logger.warn("Suspicious trades found: {}", suspiciousTrades.size());
+        }
+
         return suspiciousTrades.stream().toList();
     }
 
-    public boolean isTradeBeforePermittedWindow(Trade trade, Order order) {
-        return order.getTimestamp()
-                .isBefore(trade.getTimestamp().minusMinutes(SUSPICIOUS_TRADE_WINDOW));
+    @VisibleForTesting
+    boolean isTradeBeforePermittedWindow(Trade trade, Order order) {
+        var tradeTimestamp = trade.getTimestamp();
+        var orderTimestamp = order.getTimestamp();
+
+        logger.info("Checking if order price is suspicious: Trade Timestamp = {}, Order Timestamp = {}", tradeTimestamp, orderTimestamp);
+        var isSuspicious = orderTimestamp
+                .isBefore(tradeTimestamp.minusMinutes(SUSPICIOUS_TRADE_WINDOW));
+
+        if (isSuspicious) {
+            logger.warn("Suspicious order detected on time window: Trade = {}, Order = {}", trade, order);
+        }
+        return isSuspicious;
     }
 
-    public boolean isPriceSuspicious(Trade trade, Order order) {
+    @VisibleForTesting
+    boolean isPriceSuspicious(Trade trade, Order order) {
         var tradePrice = trade.getPrice();
         var orderPrice = order.getPrice();
 
-        return switch (trade.getSide()) {
+        logger.info("Checking if order price is suspicious: Trade Price = {}, Order Price = {}", tradePrice, orderPrice);
+
+        var isSuspicious = switch (trade.getSide()) {
             case SELL -> {
                 // Opposite side must be BUY
-                if (order.getSide() == Side.SELL)
+                if (order.getSide() == Side.SELL) {
+                    logger.debug("Order is of the same side, skipping suspicious check.");
                     yield false;
+                }
 
                 // Buy orders 10% or more cheaper are suspicious
                 var thresholdPrice = tradePrice.multiply(BigDecimal.valueOf(0.90));
@@ -64,8 +87,10 @@ public class TradeAnalyserImpl implements TradeAnalyser {
             }
             case BUY -> {
                 // Opposite side must be SELL
-                if (order.getSide() == Side.BUY)
+                if (order.getSide() == Side.BUY) {
+                    logger.debug("Order is of the same side, skipping suspicious check.");
                     yield false;
+                }
 
                 // Sell orders 10% or more expensive are suspicious
                 var thresholdPrice = tradePrice.multiply(BigDecimal.valueOf(1.10));
@@ -77,13 +102,11 @@ public class TradeAnalyserImpl implements TradeAnalyser {
                     yield orderPrice.compareTo(thresholdPrice) <= 0;
             }
         };
-    }
 
-    public boolean compareWithNegative(BigDecimal orderPrice, BigDecimal thresholdPrice) {
-        if (orderPrice.compareTo(BigDecimal.ZERO) >= 0)
-            return orderPrice.compareTo(thresholdPrice) <= 0;
-        else
-            return orderPrice.compareTo(thresholdPrice) > 0;
+        if (isSuspicious) {
+            logger.warn("Suspicious order detected on price: Trade = {}, Order = {}", trade, order);
+        }
+        return isSuspicious;
     }
 
 }
